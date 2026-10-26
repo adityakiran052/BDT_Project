@@ -41,11 +41,29 @@ The database, design document, views and Mango indexes are initialized by the se
 6. Reject the new version as administrator, with remarks. The approved previous version stays visible to students.
 7. Resubmit as faculty and approve the next version. Use **Versions** to show application version history.
 
+## Create accounts from Excel
+
+In the administrator's **Create a college account** panel, choose an `.xlsx` file under **Create accounts from Excel** and click **Preview Excel**. Review the combined full names, normalized email addresses and any skipped rows. Choose **Student** or **Faculty**, then click **Create accounts**. All valid rows receive that role and the initial password `Test@123`, stored as an individually salted hash in CouchDB.
+
+Supported layouts include `Full Name | Email`, or `First Name | Middle Name | Last Name | Email`. Headings are insensitive to spacing/capitalization; `E-mail ID` and `Email (personal)` are also recognized. With named columns, unrelated columns such as roll number and department are ignored. Without a header row, name columns must precede the email column. Blank middle names are allowed. The first worksheet is used, with a maximum of 500 populated account rows and a 5 MB file; blank and formatted-only rows and columns do not count. Save old `.xls` workbooks as `.xlsx` before uploading.
+
+Blank rows are ignored. Missing names, malformed emails, repeated emails in the workbook, formula cells and existing accounts are reported rather than imported. Existing passwords and roles are preserved. Preview creates no accounts, and the server validates the workbook again when creating accounts. Results show created, skipped and failed counts, with details for every row. A retry skips accounts already created; account creation is not an all-or-nothing database transaction.
+
 ## Administrator password resets
 
 The administrator can search by name, email or role and select a faculty or student account in **Reset faculty or student password**, then confirm **Reset password to Test@123**. The reset stores a new salted hash in CouchDB, records the administrator and time, signs out the affected account, and clears its password-change attempt limit. It does not reset another administrator account. Users can sign in with Test@123 and choose a new password through Change password.
 
 ## Architecture and data model
+
+Students have a **My Achievements** section in the sidebar. They can save optional academic details under **My academic profile**, then share an achievement with a title, category, description, optional date, issuing organization, distinction and reference link. Evidence can be a PDF certificate/publication or PNG, JPG or WebP image, up to 10 MB. All nine requested categories are supported.
+
+Faculty have a **Student Achievements** section with search and category filters. Clicking an achievement opens its full details, the submitting student's name/email and available academic profile, an inline image/PDF preview, open/download links, and links to that student's other achievements. Unfilled academic fields display **Not provided**. Students see only their own achievements; faculty and administrators can read submissions. Sharing is immediate and does not use the library document approval process.
+
+Administrators also have **Student Achievements**, with a **Delete achievement** action on each card and detail view. Confirmation removes that achievement record and its file through CouchDB's normal deletion API. The student's account, profile and other achievements remain available. Faculty and students cannot delete achievements.
+
+Achievement metadata is stored in CouchDB records of type `achievement`, with evidence in `_attachments.file`. Student academic details are stored in the user's `studentProfile` object. Password hashes and sessions are excluded from achievement details. A separate account key prevents an account recreated with a deleted student's email from inheriting old submissions. Faculty can view the original submission snapshot after the original account is deleted. Achievement search uses Mango for metadata selection and Express for text matching; it does not index certificate/publication contents.
+
+The achievement integration test covers roles, profile updates, evidence access, search, other achievements, invalid files and recreated-account isolation. It passed with both memory storage and real CouchDB. The interface was also verified in a separate temporary test instance.
 
 Administrators can select **Delete account** in the account management panel. Deleted faculty/student accounts cannot sign in and their active sessions are invalidated. Account records are deleted through the CouchDB DELETE API, so they disappear from normal database listings. CouchDB retains its deletion tombstone; demo seeding checks this marker to avoid automatically recreating deleted accounts. An administrator can explicitly create a new account with the same email and password. Accounts soft-deleted by earlier versions are converted to normal deletions on startup. Previously uploaded documents remain available until an administrator deletes them separately.
 

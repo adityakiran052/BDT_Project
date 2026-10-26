@@ -1,0 +1,245 @@
+% IEEE conference paper for the COLLEDOCS Big Data Technologies project
+\documentclass[conference]{IEEEtran}
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{balance}
+\usepackage{hyperref}
+
+\hypersetup{hidelinks}
+
+\begin{document}
+
+\title{COLLEDOCS: A Role-Based College Document Repository with Approval Workflows and Persistent CouchDB Storage}
+
+\author{
+\IEEEauthorblockN{Aditya Kiran}
+\IEEEauthorblockA{Department of Computer Engineering and Technology\\
+School of Computer Science and Engineering\\
+Dr. Vishwanath Karad MIT World Peace University, Pune\\
+\href{mailto:aditya.kiran@mitwpu.edu.in}{aditya.kiran@mitwpu.edu.in}}
+\and
+\IEEEauthorblockN{Aarushi Nishant Singh}
+\IEEEauthorblockA{Department of Computer Engineering and Technology\\
+School of Computer Science and Engineering\\
+Dr. Vishwanath Karad MIT World Peace University, Pune}
+\and
+\IEEEauthorblockN{Jinesha Gandhi}
+\IEEEauthorblockA{Department of Computer Engineering and Technology\\
+School of Computer Science and Engineering\\
+Dr. Vishwanath Karad MIT World Peace University, Pune}
+\and
+\IEEEauthorblockN{Yash Biraris}
+\IEEEauthorblockA{Department of Computer Engineering and Technology\\
+School of Computer Science and Engineering\\
+Dr. Vishwanath Karad MIT World Peace University, Pune}
+\and
+\IEEEauthorblockN{Devendra Joshi}
+\IEEEauthorblockA{Department of Computer Engineering and Technology\\
+School of Computer Science and Engineering\\
+Dr. Vishwanath Karad MIT World Peace University, Pune}
+}
+
+\maketitle
+
+\begin{abstract}
+College learning resources are frequently distributed through informal channels, making it difficult to locate current material, control who can publish it, and preserve a reliable history of revisions. This paper presents COLLEDOCS, a web-based college document repository developed as a Big Data Technologies project. The system combines a Node.js and Express application layer with Apache CouchDB for JSON metadata and file attachments. It provides three roles---administrator, faculty, and student---and uses role-aware authorization throughout account management, document listing, download, and version-history operations. Faculty submit PDF, DOCX, PPTX, or TXT resources for review; administrators approve or reject each version; and students see only approved versions. The design also includes salted password hashing, HTTP-only session cookies, rate limiting, server-side validation, CouchDB revision conflict handling, metadata search, and administrator-controlled Excel account import. A disposable in-memory mode supports demonstrations, while CouchDB mode provides persistence across application restarts. Automated workflow tests verify authentication, authorization, approval and rejection, attachment access, search filtering, version visibility, password changes, and administrative account controls. The resulting prototype demonstrates how a document repository can combine structured metadata, document attachments, and explicit review policies without claiming unsupported full-text or large-scale performance.
+\end{abstract}
+
+\begin{IEEEkeywords}
+college document repository, Apache CouchDB, document workflow, role-based access control, version history, web application, Big Data Technologies
+\end{IEEEkeywords}
+
+\section{Introduction}
+Academic institutions produce lecture notes, syllabi, notices, project reports, and previous-year examination papers continuously. When these resources are shared through disconnected messaging groups or personal drives, students may receive duplicate files, outdated revisions, or documents without clear ownership. Faculty also lack a consistent submission and review process, while administrators have limited visibility into who is allowed to publish or download a resource.
+
+COLLEDOCS addresses this problem with a centralized repository for a single college installation. The system is designed around three principles. First, document access must be determined by the user's role and the document's review status. Second, a new revision must not silently replace an already approved revision. Third, persistence and retrieval should be provided by a document-oriented database rather than by local application memory.
+
+The project makes the following contributions:
+\begin{itemize}
+    \item A browser-based repository in which administrator, faculty, and student capabilities are separated by server-side authorization.
+    \item A review workflow that preserves an approved version while a replacement is pending or rejected, with version history and reviewer remarks.
+    \item A CouchDB-backed data model that stores document metadata and attachments together, supported by views and Mango indexes for common selections.
+    \item A practical security and validation layer covering salted password hashing, session invalidation, rate limits, upload restrictions, and administrator-controlled account provisioning.
+    \item An automated test workflow that validates the principal user journeys in both memory and CouchDB modes.
+\end{itemize}
+
+The remainder of this paper is organized as follows. Section II discusses related systems and the requirements addressed by COLLEDOCS. Section III describes the architecture and data model. Section IV explains the implementation and security controls. Section V presents the evaluation and its limitations. Section VI concludes the paper and identifies future work.
+
+\section{Related Work and Requirements}
+
+\subsection{Document Repositories in Education}
+Digital libraries and learning-management systems commonly provide upload, search, and download operations. However, a small college repository often needs a narrower workflow: a controlled set of publishers, lightweight metadata, explicit review, and an uncomplicated interface. COLLEDOCS therefore does not attempt to replace a full learning-management platform. It focuses on a discoverable collection of reusable academic resources and the governance needed to share them.
+
+\subsection{Document-Oriented Persistence}
+CouchDB stores JSON documents and exposes them through an HTTP API. Its document model is suitable for COLLEDOCS because a repository entry contains heterogeneous metadata, review fields, version information, and a binary attachment. CouchDB's revision identifiers also provide a useful optimistic-concurrency mechanism: a write that uses a stale revision is rejected rather than silently overwriting another change \cite{couchdb}.
+
+\subsection{Security Requirements}
+The system handles account credentials and institution-specific documents. Passwords must not be stored in plaintext; the implementation uses salted scrypt-derived hashes, following the general password-storage guidance of NIST \cite{nist}. Browser sessions use HTTP-only cookies with SameSite protection. Authorization must be enforced by the API rather than only by hiding controls in the browser. Uploads must be limited in size and type, and search input must be treated as literal text rather than as an unintended regular expression.
+
+\subsection{Functional Requirements}
+The requirements derived for the prototype are shown in Table~\ref{tab:req}. Administrators provision accounts and review resources. Faculty upload new resources and submit later versions. Students search and download approved resources. All users can change their own password, while only administrators can reset faculty and student passwords.
+
+\begin{table}[t]
+\caption{Primary COLLEDOCS requirements}
+\label{tab:req}
+\centering
+\small
+\begin{tabular}{p{0.28\columnwidth} p{0.62\columnwidth}}
+\toprule
+\textbf{Area} & \textbf{Requirement}\\
+\midrule
+Identity & Sign in, sign out, password change, and account-specific sessions.\\
+Roles & Administrator, faculty, and student permissions are enforced by the API.\\
+Repository & Store metadata and a file attachment for each application version.\\
+Review & Approve or reject pending versions; rejection requires remarks.\\
+History & Preserve version numbers and expose only versions permitted to the current user.\\
+Discovery & Filter by department, semester, category, and metadata text.\\
+Provisioning & Create individual accounts or import validated rows from the first Excel worksheet.\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{System Architecture}
+
+\subsection{Three-Tier Design}
+COLLEDOCS follows a three-tier design:
+\begin{enumerate}
+    \item \textbf{Presentation tier:} a responsive HTML, CSS, and JavaScript interface for login, filtering, upload, review, account management, and version history.
+    \item \textbf{Application tier:} a Node.js and Express server that validates requests, authenticates users, applies role checks, manages sessions, and exposes the REST-style API.
+    \item \textbf{Data tier:} Apache CouchDB for persistent JSON records, attachments, design-document views, and Mango indexes.
+\end{enumerate}
+
+The browser never connects directly to CouchDB. It communicates with Express, and Express communicates with CouchDB using server-side credentials. This boundary prevents database credentials from being sent to a browser and creates one enforcement point for authorization.
+
+\subsection{Repository Workflow}
+The principal document workflow is:
+\begin{enumerate}
+    \item An administrator creates a faculty account or assigns the faculty role through the account-import workflow.
+    \item Faculty submit a file and metadata. The server creates the next version in the document group with status \texttt{pending}.
+    \item An administrator reviews the pending version and marks it \texttt{approved} or \texttt{rejected}. A rejection must include remarks.
+    \item Students can list, search, and download approved versions only.
+    \item When faculty submit a replacement, the earlier approved version remains visible to students until the replacement is approved.
+\end{enumerate}
+
+This state transition is intentionally conservative. A review decision applies to one application version, so a rejected or pending replacement cannot hide a usable approved version from students.
+
+\subsection{Data Model}
+User records use identifiers such as \texttt{user:<email>} and contain a role, display name, normalized email address, and password hash. Document records use identifiers of the form \texttt{document:<groupId>:<version>}. Each record stores fields including title, subject, department, semester, category, description, owner, status, version, timestamps, and review remarks. The uploaded file is stored as the \texttt{file} attachment of the same CouchDB record.
+
+The application uses a document group identifier to relate versions. A version number identifies the application history and is different from CouchDB's internal \texttt{\_rev}, which is used for conflict detection. The server removes internal revision and attachment metadata from responses intended for the browser.
+
+\subsection{Search and Access Filtering}
+Fixed metadata selections use CouchDB design-document views for department, category, semester, owner, and group. Flexible combinations and metadata text search use Mango selectors. Search is limited to title, subject, and description; it does not inspect the contents of PDF or Office files. User input is escaped before being placed in a CouchDB regular-expression selector, so a query such as \texttt{.*} is treated as literal text rather than as a wildcard.
+
+Authorization is applied when listing documents, retrieving a version history, and downloading an attachment. A student selector always requires \texttt{status = approved}; a faculty member can additionally access that faculty member's own submissions; and an administrator can review all documents. The server repeats the permission decision for download and history operations rather than trusting the list returned earlier.
+
+\section{Implementation}
+
+\subsection{Technology Stack}
+The prototype uses Node.js 24, Express, Multer for multipart uploads, ExcelJS for workbook parsing, Helmet for HTTP security headers, and express-rate-limit for request throttling. CouchDB is run as a container for the persistent configuration. A separate in-memory store implements the same store interface for disposable demonstrations and fast workflow tests.
+
+\subsection{Authentication and Authorization}
+At account creation and password change, a random salt is generated and scrypt derives a 64-byte password hash. The stored value is the salt and hash separated by a colon; the original password is never persisted. Login normalizes the email address, verifies the derived hash using a timing-safe comparison, and creates an eight-hour session.
+
+The session token is placed in an HTTP-only cookie with SameSite Strict. The server stores the active session and the password hash observed at login. On every authenticated request, the current account is loaded and the stored hash is compared with the session snapshot. Consequently, changing or resetting a password invalidates existing sessions for that account. Login, API requests, and password-change attempts are rate-limited.
+
+Role checks are implemented as middleware. Faculty-only upload routes, administrator-only review and account routes, and authenticated document routes reject unauthorized requests with explicit HTTP errors. Client-side visibility of a button is treated as a usability feature, not as an authorization control.
+
+\subsection{Uploads and Validation}
+The upload interface accepts PDF, DOCX, PPTX, and TXT files with a 10 MB limit. The server validates required metadata, the permitted category and semester values, the file extension, and basic file signatures before storing the attachment. A new version is linked to a previous version only after checking that the caller owns the document group. Multer keeps the multipart data in memory while the request is processed; CouchDB then stores the attachment with the metadata record.
+
+\subsection{Excel Account Import}
+Administrators can preview and then create up to 500 populated account rows from the first worksheet of an \texttt{.xlsx} file. The parser recognizes a full-name column or first-, middle-, and last-name columns, normalizes supported email headings, rejects formulas and malformed emails, detects duplicate rows, and ignores blank or formatting-only rows. Preview creates no accounts. The server parses and validates the workbook again during creation, and each successful row is written independently with the initial password \texttt{Test@123}, which must be changed by the user.
+
+\subsection{CouchDB Indexes and Conflicts}
+The application initializes the database, security settings, a catalog design document, and Mango indexes at startup. Views support repeated equality lookups for common metadata fields. Mango queries are paginated internally with bookmarks when more than one response page is needed. A write includes the document's current revision; if another request has changed the record, CouchDB returns a conflict and the application reports a retryable error instead of overwriting data.
+
+\section{Evaluation}
+
+\subsection{Test Method}
+The repository includes Node's built-in test runner. The principal integration workflow starts the application, creates sessions for all three roles, submits a text attachment as faculty, exercises the approval and rejection paths, checks student visibility, downloads the approved attachment, searches metadata, creates a second version, and verifies version-history permissions. The same test can use the memory store or a real CouchDB database selected through the test environment.
+
+\subsection{Functional Results}
+The automated workflow verifies the following behaviors:
+\begin{itemize}
+    \item unauthenticated users cannot access repository data;
+    \item students cannot upload, review, download pending files, or view unauthorized account operations;
+    \item faculty submissions are hidden from students until approval;
+    \item rejection without remarks is refused, while a rejection with remarks is recorded;
+    \item students continue to see version 1 while version 2 is pending or rejected;
+    \item approved attachments can be downloaded through the API;
+    \item metadata filters and literal search terms return the intended documents;
+    \item password changes and administrator resets invalidate previous sessions and store hashes rather than plaintext passwords;
+    \item deleted or unauthorized resources are not exposed through list, history, or download routes.
+\end{itemize}
+
+\begin{table}[t]
+\caption{Validation scope of the implemented prototype}
+\label{tab:validation}
+\centering
+\small
+\begin{tabular}{p{0.39\columnwidth} p{0.46\columnwidth}}
+\toprule
+\textbf{Validation area} & \textbf{Observed result}\\
+\midrule
+Authentication & Correct login, logout, password verification, and invalid-session rejection.\\
+Role enforcement & Administrator, faculty, and student restrictions pass the workflow checks.\\
+Review workflow & Approval, required rejection remarks, and pending/rejected visibility are checked.\\
+Attachments & Approved file download succeeds; pending student download is blocked.\\
+Versions & New version creation and preservation of the prior approved version are checked.\\
+Search & Department and text filters work; regex metacharacters are treated literally.\\
+Persistence modes & Tests support memory storage and an explicitly selected CouchDB database.\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{What Has Not Been Measured}
+The current project is a functional academic prototype rather than a production benchmark. No claim is made here about throughput at large document counts, full-text indexing performance, OCR quality, malware scanning, or a statistically powered usability study. Search uses metadata regular expressions in CouchDB and is not an indexed full-text engine. Sessions are held in Express memory, so restarting the application signs users out even though CouchDB data remains persistent. These limitations define the boundary of the reported results.
+
+\section{Discussion}
+
+The main design trade-off is simplicity versus scale. Storing metadata and an attachment in one document makes the workflow straightforward and keeps the server in control of access, but it does not constitute a content-indexed digital library. Views and Mango indexes reduce repeated application-side filtering for common fields, while text matching remains appropriate for a local prototype with modest data volume.
+
+The version policy improves reliability for students: approval of a replacement is independent of the earlier version, so an unfinished review cannot remove the last approved resource. It also increases storage and review work because every replacement must be approved separately. This trade-off is appropriate for academic material where stale or unreviewed files can be more harmful than an additional review step.
+
+The system's security controls are layered rather than dependent on one feature. Password hashing protects stored credentials, cookies limit browser exposure, rate limiting slows repeated attempts, request validation rejects malformed input, and server-side authorization protects each sensitive route. Nevertheless, these controls do not replace deployment requirements such as HTTPS, secret rotation, malware scanning, backups, audit retention, and persistent session storage.
+
+\section{Conclusion and Future Work}
+
+This paper presented COLLEDOCS, a role-based college document repository that combines a web application, explicit approval workflow, application-level version history, and CouchDB persistence. The implementation centralizes academic resources while preserving a clear distinction between pending, approved, and rejected material. Functional tests demonstrate the core workflow across authentication, authorization, attachments, searching, password management, and version visibility.
+
+Future work will focus on four areas. First, a benchmark should measure median and tail latency at documented dataset sizes and compare view, Mango, and a dedicated full-text search engine. Second, file-content indexing and OCR could support searching inside documents, subject to privacy and storage constraints. Third, browser usability studies with students, faculty, and administrators could measure task completion time and error rates. Finally, a production deployment should add HTTPS termination, persistent or distributed session storage, backup and restore procedures, malware scanning, audit logs, and stronger operational monitoring.
+
+\balance
+\begin{thebibliography}{00}
+
+\bibitem{couchdb}
+Apache Software Foundation, ``Apache CouchDB documentation: Introduction and HTTP API,'' 2025. [Online]. Available: \url{https://docs.couchdb.org/en/stable/}
+
+\bibitem{mango}
+Apache Software Foundation, ``Apache CouchDB documentation: Mango queries,'' 2025. [Online]. Available: \url{https://docs.couchdb.org/en/stable/ddocs/mango.html}
+
+\bibitem{node}
+OpenJS Foundation, ``Node.js documentation,'' 2025. [Online]. Available: \url{https://nodejs.org/docs/latest/api/}
+
+\bibitem{express}
+OpenJS Foundation, ``Express web framework documentation,'' 2025. [Online]. Available: \url{https://expressjs.com/}
+
+\bibitem{nist}
+P. A. Grassi, M. E. Garcia, and J. L. Fenton, ``Digital identity guidelines: Authentication and lifecycle management,'' NIST Special Publication 800-63B, National Institute of Standards and Technology, 2020.
+
+\bibitem{owasp}
+OWASP Foundation, ``File upload cheat sheet,'' 2025. [Online]. Available: \url{https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html}
+
+\bibitem{scrypt}
+C. Percival and S. Josefsson, ``The scrypt password-based key derivation function,'' RFC 7914, Internet Engineering Task Force, 2016.
+
+\bibitem{exceljs}
+ExcelJS contributors, ``ExcelJS documentation,'' 2025. [Online]. Available: \url{https://github.com/exceljs/exceljs}
+
+\end{thebibliography}
+
+\end{document}
